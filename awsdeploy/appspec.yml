@@ -1,0 +1,35 @@
+version: 0.0
+os: linux
+
+files:
+  - source: /
+    destination: /usr/local/src/awsdeploy
+permissions:
+  - object: /usr/local/src/awsdeploy
+    owner: ubuntu
+    group: ubuntu
+    type:
+      - directory
+      - file
+
+hooks:
+  ApplicationStop:
+    - location: scripts/application-stop.sh
+      timeout: 300
+      runas: ubuntu
+  BeforeInstall:
+    - location: scripts/before-install.sh
+      timeout: 300
+      runas: root
+  AfterInstall:
+    - location: scripts/after-install.sh
+      timeout: 300
+      runas: ubuntu
+  ApplicationStart:
+    - location: scripts/application-start.sh
+      timeout: 300
+      runas: ubuntu
+  ValidateService:
+    - location: scripts/validate-service.sh
+      timeout: 300
+      runas: ubuntu

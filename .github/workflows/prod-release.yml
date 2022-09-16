@@ -1,0 +1,69 @@
+name: PRODUCTION release
+
+# Run the pipeline manually first in order to test that everything works well
+on:
+  workflow_dispatch:
+#on:
+#  push:
+#    branches: [ "release" ]
+
+env:
+  MIX_ENV: prod
+  PORT: 80
+  APP_NAME: guild_hall
+  AWS_REGION: eu-west-1
+  AWS_S3_BUCKET: crafting-codedeploy-artifacts
+  AWS_DEPLOY_APP_NAME: GuildHall
+  AWS_DEPLOY_GROUP: production
+
+jobs:
+  deploy:
+    name: Build and deploy artifacts
+    runs-on: ubuntu-20.04
+    steps:
+    - uses: actions/checkout@v3
+    - name: Setup Elixir environment
+      uses: erlef/setup-beam@v1
+      with:
+        elixir-version: '1.12.1' # Define the elixir version [required]
+        otp-version: '23.2.1' # Define the erlang/OTP version [required]
+
+    # Build the release artifacts using mix and copy them to awsdeploy directory for deployment
+    - name: Set version environment variable
+      run: echo "APP_VSN=$(grep 'version:' mix.exs | cut -d '"' -f2 | tail -1 )" >> $GITHUB_ENV
+    - name: Get dependencies and compile
+      run: mix do clean, deps.get --only $MIX_ENV, compile --force
+    - name: Compress artifacts
+      run: mix phx.digest --env=$MIX_ENV
+    - name: Generate release file
+      run: mix release $APP_NAME
+    - name: Copy generated artifacts
+      run: cp ${GITHUB_WORKSPACE}/_build/${{ env.MIX_ENV }}/${{ env.APP_NAME }}-${{ env.APP_VSN }}.tar.gz ${GITHUB_WORKSPACE}/awsdeploy
+
+    # Configure AWS access and secret key in order to use the aws cli commands
+    - name: Configure AWS Credentials
+      uses: aws-actions/configure-aws-credentials@v1
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    # Create a push revision and copy the artifacts to S3 bucket
+    - name: AWS Deploy push artifacts to S3
+      run: |
+        aws deploy push \
+        --application-name ${{ env.AWS_DEPLOY_APP_NAME }} \
+        --description "Revision for ${{ env.APP_NAME }} from commit hash ${{ github.sha }}" \
+        --ignore-hidden-files \
+        --s3-location s3://${{ env.AWS_S3_BUCKET }}/${{ env.AWS_DEPLOY_APP_NAME }}/${{ env.AWS_DEPLOY_GROUP }}/${{ env.APP_NAME }}-${{ github.sha }}.zip \
+        --source ${GITHUB_WORKSPACE}/awsdeploy/
+
+    # Create deployment via CodeDeploy to EC2 instance
+    - name: AWS Create Deployment
+      run: |
+        aws deploy create-deployment \
+         --application-name ${{ env.AWS_DEPLOY_APP_NAME }} \
+         --deployment-config-name CodeDeployDefault.OneAtATime \
+         --deployment-group-name ${{ env.AWS_DEPLOY_GROUP }} \
+         --file-exists-behavior OVERWRITE \
+         --s3-location bucket=${{ env.AWS_S3_BUCKET }},key=${{ env.AWS_DEPLOY_APP_NAME }}/${{ env.AWS_DEPLOY_GROUP }}/${{ env.APP_NAME }}-${{ github.sha }}.zip,bundleType=zip \

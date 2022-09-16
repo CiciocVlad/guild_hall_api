@@ -1,0 +1,12 @@
+# Start all the storage containers locally without running the application inside docker
+version: '2'
+services:
+  db:
+    image: postgres:10
+    environment:
+      POSTGRES_USER: guild_hall
+      POSTGRES_PASSWORD: guild_hall
+    ports:
+      - "5432:5432"
+    volumes:
+      - ${HOME}/.guild_hall/db/data:/var/lib/postgresql/data
